@@ -1,0 +1,178 @@
+-- Script in ServerScriptService
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+-- Create or Get RemoteEvent
+local SaitamaEvent = ReplicatedStorage:FindFirstChild("SaitamaAbilityEvent")
+if not SaitamaEvent then
+	SaitamaEvent = Instance.new("RemoteEvent")
+	SaitamaEvent.Name = "SaitamaAbilityEvent"
+	SaitamaEvent.Parent = ReplicatedStorage
+end
+
+-- Helper: Find enemies in front of the player
+local function getHitTargets(player, range)
+	local char = player.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return {} end
+	
+	local origin = char.HumanoidRootPart.Position
+	local lookDir = char.HumanoidRootPart.CFrame.LookVector
+	local targets = {}
+	
+	for _, otherPlayer in ipairs(Players:GetPlayers()) do
+		if otherPlayer ~= player and otherPlayer.Character then
+			local enemyRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+			local enemyHum = otherPlayer.Character:FindFirstChildOfClass("Humanoid")
+			
+			if enemyRoot and enemyHum then
+				local dist = (enemyRoot.Position - origin).Magnitude
+				local directionToEnemy = (enemyRoot.Position - origin).Unit
+				
+				-- Check if enemy is within range and in front of player
+				if dist <= range and lookDir:Dot(directionToEnemy) > 0.3 then
+					table.insert(targets, {Root = enemyRoot, Humanoid = enemyHum})
+				end
+			end
+		end
+	end
+	return targets
+end
+
+
+-- Handle move execution on server
+SaitamaEvent.OnServerEvent:Connect(function(player, moveName)
+	local char = player.Character
+	if not char then return end
+	local root = char:FindFirstChild("HumanoidRootPart")
+	
+	if moveName == "NormalPunches" then
+		local targets = getHitTargets(player, 8)
+		for _, target in ipairs(targets) do
+			target.Humanoid:TakeDamage(15)
+			-- Apply slight knockback
+			target.Root.Velocity = root.CFrame.LookVector * 30 + Vector3.new(0, 10, 0)
+		end
+
+	elseif moveName == "ConsecutivePunches" then
+		task.spawn(function()
+			for i = 1, 5 do -- Rapid 5-hit burst
+				local targets = getHitTargets(player, 10)
+				for _, target in ipairs(targets) do
+					target.Humanoid:TakeDamage(5)
+				end
+				task.wait(0.1)
+			end
+		end)
+
+	elseif moveName == "Shove" then
+		local targets = getHitTargets(player, 7)
+		for _, target in ipairs(targets) do
+			target.Humanoid:TakeDamage(10)
+			-- Heavy ragdoll/knockback push
+			target.Root.Velocity = root.CFrame.LookVector * 60 + Vector3.new(0, 20, 0)
+		end
+
+	elseif moveName == "SeriousPunch" then
+		local targets = getHitTargets(player, 25)
+		for _, target in ipairs(targets) do
+			target.Humanoid:TakeDamage(999) -- Instant KO / Ultimate Damage
+			target.Root.Velocity = root.CFrame.LookVector * 150 + Vector3.new(0, 50, 0)
+		end
+	end
+end)
+-- LocalScript: Saitama Moveset Controller
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Wait for the RemoteEvent in ReplicatedStorage (Create this event in ReplicatedStorage)
+local SaitamaEvent = ReplicatedStorage:WaitForChild("SaitamaAbilityEvent")
+
+-- Cooldown Tracker
+local cooldowns = {
+	NormalPunches = false,
+	ConsecutivePunches = false,
+	Shove = false,
+	SeriousPunch = false
+}
+
+-- Ability Keybind Setup
+local Keybinds = {
+	[Enum.KeyCode.One] = "NormalPunches",
+	[Enum.KeyCode.Two] = "ConsecutivePunches",
+	[Enum.KeyCode.Three] = "Shove",
+	[Enum.KeyCode.G] = "SeriousPunch" -- Ultimate Move
+}
+
+-- Visual Camera Shake Effect
+local function cameraShake(duration, intensity)
+	local camera = workspace.CurrentCamera
+	local startTime = os.clock()
+	
+	task.spawn(function()
+		while os.clock() - startTime < duration do
+			local offsetX = math.random(-intensity, intensity) / 100
+			local offsetY = math.random(-intensity, intensity) / 100
+			camera.CFrame = camera.CFrame * CFrame.Angles(offsetX, offsetY, 0)
+			task.wait(0.02)
+		end
+	end)
+end
+
+-- Key Input Trigger
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end -- Ignore input if typing in chat
+	
+	local abilityName = Keybinds[input.KeyCode]
+	if not abilityName then return end
+	
+	-- Check Cooldowns
+	if cooldowns[abilityName] then
+		print(abilityName .. " is on cooldown!")
+		return
+	end
+
+	-- Execute Moves
+	if abilityName == "NormalPunches" then
+		cooldowns.NormalPunches = true
+		print("Executed: Consecutive Normal Punches!")
+		cameraShake(0.3, 3)
+		SaitamaEvent:FireServer("NormalPunches")
+		
+		task.wait(3) -- 3 second cooldown
+		cooldowns.NormalPunches = false
+
+	elseif abilityName == "ConsecutivePunches" then
+		cooldowns.ConsecutivePunches = true
+		print("Executed: Consecutive Punches!")
+		cameraShake(0.8, 5)
+		SaitamaEvent:FireServer("ConsecutivePunches")
+		
+		task.wait(6) -- 6 second cooldown
+		cooldowns.ConsecutivePunches = false
+
+	elseif abilityName == "Shove" then
+		cooldowns.Shove = true
+		print("Executed: Shove!")
+		cameraShake(0.2, 2)
+		SaitamaEvent:FireServer("Shove")
+		
+		task.wait(4) -- 4 second cooldown
+		cooldowns.Shove = false
+
+	elseif abilityName == "SeriousPunch" then
+		cooldowns.SeriousPunch = true
+		print("Executed ULTIMATE: SERIOUS PUNCH!")
+		cameraShake(1.5, 12)
+		SaitamaEvent:FireServer("SeriousPunch")
+		
+		task.wait(15) -- 15 second cooldown
+		cooldowns.SeriousPunch = false
+	end
+end)
